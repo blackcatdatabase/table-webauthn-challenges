@@ -25,8 +25,10 @@ final class WebauthnChallengesModule implements ModuleInterface
 
     public function install(Database $db, SqlDialect $d): void
     {
+        // 1) Run schema files from ../schema for the dialect (NNN_*.sql order respected)
         SqlDirectoryRunner::run($db, $d, __DIR__ . '/../schema');
 
+        // 2) Contract view = SELECT * FROM <table>
         $table = SqlIdentifier::qi($db, $this->table());
         $view  = SqlIdentifier::qi($db, self::contractView());
 
@@ -61,20 +63,25 @@ SQL;
         if (\class_exists('\\BlackCat\\Database\\Support\\DdlGuard')) {
             (new \BlackCat\Database\Support\DdlGuard($db, $d))->applyCreateView($createViewSql);
         } else {
+            // Prefer CREATE OR REPLACE VIEW (gentle on dependencies)
             $db->exec($createViewSql);
         }
+
     }
 
     public function upgrade(Database $db, SqlDialect $d, string $from): void
     {
+        // Optional: generator may place module-specific upgrade steps here (e.g., data migrations).
     }
 
+    /** Does not drop the table, only the contract (view). */
     public function uninstall(Database $db, SqlDialect $d): void
     {
         $qiV = SqlIdentifier::qi($db, self::contractView());
         try {
             $db->exec("DROP VIEW IF EXISTS {$qiV}" . ($d->isMysql() ? "" : " CASCADE"));
         } catch (\Throwable) {
+            // swallow
         }
     }
 
@@ -86,8 +93,10 @@ SQL;
         $hasTable = SchemaIntrospector::hasTable($db, $d, $table);
         $hasView  = SchemaIntrospector::hasView($db, $d, $view);
 
+        // Quick index/FK check - generator injects names (case-sensitive per DB)
         $expectedIdx = [ 'idx_webauthn_challenge_expires' ];
         if ($d->isMysql()) {
+            // Drop PG-only index naming patterns (e.g., GIN/GiST)
             $expectedIdx = array_values(array_filter(
                 $expectedIdx,
                 static fn(string $n): bool => !str_starts_with($n, 'gin_') && !str_starts_with($n, 'gist_')

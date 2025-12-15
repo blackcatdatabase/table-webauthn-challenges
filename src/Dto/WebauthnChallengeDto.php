@@ -13,9 +13,9 @@ final class WebauthnChallengeDto implements \JsonSerializable {
         public readonly int $id,
         public readonly string $rpId,
         public readonly string $challengeHash,
-        #[\SensitiveParameter] public readonly array $metadata,
+        public readonly array $metadata,
         public readonly \DateTimeImmutable $expiresAt,
-        public readonly \DateTimeImmutable $createdAt,
+        public readonly \DateTimeImmutable $createdAt
     ) {}
 
     /** Suitable for serialization/logging (without large blobs). */
@@ -32,6 +32,7 @@ final class WebauthnChallengeDto implements \JsonSerializable {
        $a = $this->toArray();
        foreach ($a as $k => $v) {
            if ($v instanceof \DateTimeInterface) {
+               // ISO-8601 with a timezone; switch to 'Y-m-d H:i:s.u' if needed
                $a[$k] = $v->format(\DateTimeInterface::ATOM);
            }
        }

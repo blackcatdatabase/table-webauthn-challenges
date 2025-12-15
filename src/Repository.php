@@ -3,11 +3,12 @@ declare(strict_types=1);
 
 namespace BlackCat\Database\Packages\WebauthnChallenges;
 
-use BlackCat\Core\Database as Database;
+use BlackCat\Core\Database as Database;              // e.g. BlackCat\Core\Database
 use BlackCat\Database\Packages\WebauthnChallenges\Criteria;
 use BlackCat\Database\Packages\WebauthnChallenges\Repository\WebauthnChallengeRepositoryInterface;
 use BlackCat\Database\Packages\WebauthnChallenges\Repository\WebauthnChallengeRepository as GeneratedRepository;
 use BlackCat\Database\Contracts\ContractRepository as RepoContract;
+use BlackCat\Database\Contracts\KeysetRepository as KeysetRepoContract;
 
 /**
  * Umbrella/facade for tests and tooling - keeps a stable FQN.
@@ -21,19 +22,26 @@ final class Repository
       $this->repo = new GeneratedRepository($db);
   }
 
+    /**
+     * @internal test helper to swap the underlying repository (testing only).
+     * Accepts any ContractRepository implementing the methods this facade forwards.
+     */
     public function _setRepositoryForTests(RepoContract $repo): void
     {
+        // Methods this facade forwards and relies on
         foreach (['paginateBySeek','paginate','getById','getByUnique','findById','exists','count'] as $method) {
             if (!method_exists($repo, $method)) {
                 throw new \InvalidArgumentException("Test repo must implement {$method}().");
             }
         }
         if (!$repo instanceof WebauthnChallengeRepositoryInterface) {
+            // Allow any repo that conforms to the interface even if not generated
             throw new \InvalidArgumentException('Expected WebauthnChallengeRepositoryInterface');
         }
         $this->repo = $repo;
     }
 
+    /** Convenience Criteria factory bound to this Database (handles dialect and optional tenancy). */
     public function criteria(int|string|array|null $tenantId = null, string $tenantColumn = "tenant_id", bool $quoteIdentifiers = false): Criteria
     {
         return Criteria::fromDb($this->db, $tenantId, $tenantColumn, $quoteIdentifiers);
@@ -85,7 +93,9 @@ final class Repository
 
     // --- Read/Exists/Count ---------------------------------------------------
     public function findById(int|string|array $id): ?array { return $this->repo->findById($id); }
+    /** @param non-empty-string $whereSql */
     public function exists(string $whereSql = '1=1', array $params = []): bool { return $this->repo->exists($whereSql ?: '1=1', $params); }
+    /** @param non-empty-string $whereSql */
     public function count(string $whereSql = '1=1', array $params = []): int { return $this->repo->count($whereSql ?: '1=1', $params); }
     public function findAllByIds(array $ids): array { return $this->repo->findAllByIds($ids); }
     public function getByUnique(array $keys, bool $asDto = false): array|\BlackCat\Database\Packages\WebauthnChallenges\Dto\WebauthnChallengeDto|null { return $this->repo->getByUnique($keys, $asDto); }
@@ -98,6 +108,11 @@ final class Repository
         }
         return $this->repo->paginate($c);
     }
+    /**
+     * @param array{col?:string,dir?:string,pk?:string,nullsLast?:bool} $order
+     * @param array{colValue:mixed,pkValue:mixed}|null $cursor
+     * @return array{0:array<int,array<string,mixed>>,1:array{colValue:mixed,pkValue:mixed}|null}
+     */
     public function paginateBySeek(object $c, array $order, ?array $cursor, int $limit): array
     {
         if (!$c instanceof Criteria) {
@@ -106,6 +121,7 @@ final class Repository
         return $this->repo->paginateBySeek($c, $order, $cursor, $limit);
     }
 
+    /** @param 'wait'|'nowait'|'skip_locked' $mode  @param 'update'|'share' $strength */
     public function lockById(int|string|array $id, string $mode = 'wait', string $strength = 'update'): ?array {
         $mode = in_array($mode, ['wait','nowait','skip_locked'], true) ? $mode : 'wait';
         $strength = in_array($strength, ['update','share'], true) ? $strength : 'update';
