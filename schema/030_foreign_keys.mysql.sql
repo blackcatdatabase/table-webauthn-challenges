@@ -1,0 +1,3 @@
+-- Auto-generated from schema-map-mysql.yaml
+-- engine: mysql
+-- table:  webauthn_challenges
