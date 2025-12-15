@@ -1,3 +1,0 @@
--- Auto-generated from schema-map-postgres.yaml
--- engine: postgres
--- table:  webauthn_challenges

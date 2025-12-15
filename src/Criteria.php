@@ -9,6 +9,12 @@ use BlackCat\Core\Database;
 /**
  * Per-repo Criteria - thin layer on top of the central BlackCat\Database\Support\Criteria.
  *
+ * Tokens filled by the generator:
+ *  - FILTERABLE_COLUMNS_ARRAY   e.g., ["id","tenant_id","status","created_at"]
+ *  - SEARCHABLE_COLUMNS_ARRAY   e.g., ["order_no","customer_email"]
+ *  - DEFAULT_PER_PAGE           e.g., 50
+ *  - MAX_PER_PAGE               e.g., 500
+ *
  * All the "hard" logic (dialect, LIKE/ILIKE, NULLS LAST, tenancy, seek, join params,
  * andWhere()/bind() compatibility, etc.) lives in BaseCriteria. Here we only declare whitelists
  * and per-repo limits plus an optional fromDb() factory.
@@ -38,7 +44,7 @@ final class Criteria extends BaseCriteria
     /** Columns allowed in ORDER BY (falls back to filterable() when empty). */
     protected function sortable(): array
     {
-        return [ 'id', 'expires_at', 'created_at' ];
+        return [ 'id', 'rp_id', 'challenge_hash', 'expires_at', 'created_at' ];
     }
 
     /**
@@ -65,6 +71,11 @@ final class Criteria extends BaseCriteria
 
     /**
      * QoL factory: detect dialect based on the PDO driver and optionally apply a tenancy filter.
+     *
+     * Example:
+     *   $crit = Criteria::fromDb($db, tenantId: 42)
+     *                   ->search("foo")
+     *                   ->orderBy("created_at","DESC");
      */
     public static function fromDb(
         Database $db,
@@ -72,18 +83,11 @@ final class Criteria extends BaseCriteria
         string $tenantColumn = "tenant_id",
         bool $quoteIdentifiers = false
     ): static {
-        $c = new static();
+        $c = new static(); // previously: new self()
 
         $c->setDialectFromDatabase($db);
         if ($quoteIdentifiers) { $c->enableIdentifierQuoting(true); }
-        if (
-            $tenantId !== null
-            && $tenantColumn !== ''
-            && \method_exists(\BlackCat\Database\Packages\WebauthnChallenges\Definitions::class, 'hasTenant')
-            && \BlackCat\Database\Packages\WebauthnChallenges\Definitions::hasTenant()
-        ) {
-            $c->tenant($tenantId, $tenantColumn);
-        }
+        if ($tenantId !== null && $tenantColumn !== '') { $c->tenant($tenantId, $tenantColumn); }
 
         if (\method_exists(\BlackCat\Database\Packages\WebauthnChallenges\Definitions::class, 'softDeleteColumn')) {
             $soft = \BlackCat\Database\Packages\WebauthnChallenges\Definitions::softDeleteColumn();
