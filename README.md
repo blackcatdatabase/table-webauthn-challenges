@@ -5,13 +5,13 @@
 
 ![PHP](https://img.shields.io/badge/PHP-8.3-blueviolet) ![DB](https://img.shields.io/badge/DB-MySQL%20%7C%20MariaDB%20%7C%20Postgres-informational) ![License](https://img.shields.io/badge/license-BlackCat%20Proprietary-red) ![Status](https://img.shields.io/badge/status-stable-success)
 
-![Docs](https://img.shields.io/badge/Docs-ready-success) ![Changelog](https://img.shields.io/badge/Changelog-missing-critical) ![Changelog%20freshness](https://img.shields.io/badge/Changelog%20freshness-fresh-success) ![Seeds](https://img.shields.io/badge/Seeds-missing-critical) ![Views](https://img.shields.io/badge/Views-ok-success) ![Lineage](https://img.shields.io/badge/Lineage-solo-critical) ![Drift](https://img.shields.io/badge/Drift-clean-success) ![Index%20coverage](https://img.shields.io/badge/Index%20coverage-ready-success) ![PII](https://img.shields.io/badge/PII-review-critical)
+![Docs](https://img.shields.io/badge/Docs-ready-success) ![Changelog](https://img.shields.io/badge/Changelog-ok-success) ![Changelog%20freshness](https://img.shields.io/badge/Changelog%20freshness-fresh-success) ![Seeds](https://img.shields.io/badge/Seeds-missing-critical) ![Views](https://img.shields.io/badge/Views-ok-success) ![Lineage](https://img.shields.io/badge/Lineage-solo-critical) ![Drift](https://img.shields.io/badge/Drift-clean-success) ![Index%20coverage](https://img.shields.io/badge/Index%20coverage-ready-success) ![PII](https://img.shields.io/badge/PII-review-critical)
 
 ✅ No engine drift detected
 
 > **Schema snapshot**
 > Map: [schema-map-postgres.yaml](https://github.com/blackcatacademy/blackcat-database/blob/main/scripts/schema/schema-map-postgres.yaml) · Docs: [docs/definitions.md](docs/definitions.md) · Drift warnings: 0
-> Lineage: 0 outbound / 0 inbound · ✅ No engine drift detected · Index coverage: ready · PII flags: 1 · Changelog: n/a
+> Lineage: 0 outbound / 0 inbound · ✅ No engine drift detected · Index coverage: ready · PII flags: 1 · Changelog: fresh
 
 ## Quick Links
 | What | Link | Notes |
@@ -20,7 +20,7 @@
 | Pkg folder | [packages/webauthn-challenges](https://github.com/blackcatacademy/blackcat-database/blob/main/packages/webauthn-challenges) | Repo location |
 | Definitions | [docs/definitions.md](docs/definitions.md) | Column/index/FK docs |
 | Engine differences | [docs/definitions.md#engine-differences](docs/definitions.md#engine-differences) | Drift section in definitions |
-| Changelog | _(missing)_ |  |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) | Recent changes |
 
 ## Contents
 | Section | Purpose |
@@ -62,7 +62,8 @@
 | Views | **2** |
 | Seeds | **0** |
 | Docs | **present** |
-| Changelog | _missing_ |
+| Changelog | **present** |
+| Changelog freshness | fresh (threshold 45 d) |
 | Lineage | outbound **0** / inbound **0** |
 | Index coverage | **ready** |
 | Engine targets | PHP 8.3; MySQL/MariaDB/Postgres |
@@ -125,7 +126,7 @@ BC_DB=mariadb vendor/bin/phpunit --configuration tests/phpunit.xml.dist --testsu
 
 ## Quality Gates
 - [x] Definitions present
-- [ ] Changelog present
+- [x] Changelog present
 - [x] Changelog fresh
 - [x] Index coverage (PK + index)
 - [ ] Outbound lineage captured
