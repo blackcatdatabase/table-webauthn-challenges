@@ -3,14 +3,14 @@
 WebAuthn pending challenges (registration/authentication) stored server-side.
 
 ## Columns
-| Column | Type | Null | Default | Description |
-| --- | --- | --- | --- | --- |
-| id | BIGINT | NO |  | Surrogate primary key. |
-| rp_id | VARCHAR(255) | NO |  | Relying Party ID (domain). |
-| challenge_hash | CHAR(64) | NO |  | SHA-256 hash of the challenge (hex). |
-| metadata | mysql: JSON / postgres: JSONB | NO |  | Stored challenge metadata as JSON (type, subject, allowed credentials). |
-| expires_at | mysql: DATETIME(6) / postgres: TIMESTAMPTZ(6) | NO |  | Expiration timestamp (UTC). |
-| created_at | mysql: DATETIME(6) / postgres: TIMESTAMPTZ(6) | NO | CURRENT_TIMESTAMP(6) | Creation timestamp (UTC). |
+| Column | Type | Null | Default | Description | Crypto |
+| --- | --- | --- | --- | --- | --- |
+| id | BIGINT | NO |  | Surrogate primary key. |  |
+| rp_id | VARCHAR(255) | NO |  | Relying Party ID (domain). |  |
+| challenge_hash | CHAR(64) | NO |  | SHA-256 hash of the challenge (hex). |  |
+| metadata | mysql: JSON / postgres: JSONB | NO |  | Stored challenge metadata as JSON (type, subject, allowed credentials). |  |
+| expires_at | mysql: DATETIME(6) / postgres: TIMESTAMPTZ(6) | NO |  | Expiration timestamp (UTC). |  |
+| created_at | mysql: DATETIME(6) / postgres: TIMESTAMPTZ(6) | NO | CURRENT_TIMESTAMP(6) | Creation timestamp (UTC). |  |
 
 ## Engine Details
 
