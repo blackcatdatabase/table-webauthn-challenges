@@ -1,0 +1,26 @@
+{
+  "tables": {
+    "webauthn_challenges": {
+      "columns": {
+        "created_at": {
+          "strategy": "passthrough"
+        },
+        "expires_at": {
+          "strategy": "passthrough"
+        },
+        "challenge_hash": {
+          "strategy": "passthrough"
+        },
+        "id": {
+          "strategy": "passthrough"
+        },
+        "metadata": {
+          "strategy": "passthrough"
+        },
+        "rp_id": {
+          "strategy": "passthrough"
+        }
+      }
+    }
+  }
+}
