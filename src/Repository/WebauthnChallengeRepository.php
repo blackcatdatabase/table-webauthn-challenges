@@ -10,6 +10,7 @@ use BlackCat\Database\Packages\WebauthnChallenges\Dto\WebauthnChallengeDto as Dt
 use BlackCat\Database\Packages\WebauthnChallenges\Mapper\WebauthnChallengeDtoMapper as RowMapper;
 use BlackCat\Database\Contracts\ContractRepository as RepoContract;
 use BlackCat\Database\Contracts\KeysetRepository as KeysetRepoContract;
+use BlackCat\Database\Packages\WebauthnChallenges\Repository\WebauthnChallengeRepositoryInterface;
 use BlackCat\Database\Support\OrderByTools;
 use BlackCat\Database\Support\SqlIdentifier as Ident;
 use BlackCat\Database\Support\PkTools;
@@ -23,12 +24,12 @@ class WebauthnChallengeRepository implements WebauthnChallengeRepositoryInterfac
 use OrderByTools, PkTools, RepositoryHelpers;
 
     /** @var mixed literal token for upsert keys (array or empty). */
-    private mixed $tokenUpsertKeys = [];
+    private mixed $tokenUpsertKeys = [ 'rp_id', 'challenge_hash' ];
 
     public function __construct(private readonly Database $db) {}
 
     /**
-     * Optionally override the Definitions FQN â€“ trait otherwise infers it from the repository FQN.
+     * Optionally override the Definitions FQN - trait otherwise infers it from the repository FQN.
      */
     protected function def(): string { return \BlackCat\Database\Packages\WebauthnChallenges\Definitions::class; }
 
@@ -121,7 +122,7 @@ use OrderByTools, PkTools, RepositoryHelpers;
         }
         $soft = Definitions::softDeleteColumn();
         if ($soft) {
-            // CLEAR: deleted_at = NULL on conflict.
+            // CLEAR: deleted_at = NULL on conflict
             $row[$soft] = null;
             if (!in_array($soft, $updateCols, true)) {
                 $updateCols[] = $soft;
@@ -130,7 +131,7 @@ use OrderByTools, PkTools, RepositoryHelpers;
         return [$row, $updateCols];
     }
 
-    /** Upsert row – default behavior preserves soft-delete (no revive). */
+    /** Standard upsert - preserves soft-delete (no revive). */
     public function upsert(#[\SensitiveParameter] array $row): void
     {
         $this->doUpsert($row, false);
@@ -150,7 +151,6 @@ use OrderByTools, PkTools, RepositoryHelpers;
 
         $keys = $this->resolveUpsertKeys();
 
-        // Generated from schema-map: webauthn_challenges upsert updates metadata/expiry on (rp_id, challenge_hash).
         $updCols = [ 'metadata', 'expires_at' ];
         $updCols = array_values(array_diff($updCols, array_merge($this->pkColumns(Definitions::class), $keys)));
 
@@ -168,7 +168,7 @@ use OrderByTools, PkTools, RepositoryHelpers;
         $this->db->execute($sql, $params);
     }
 
-    /** Upsert by keys – default behavior keeps soft-delete. */
+    /** Upsert by keys - default behavior keeps soft-delete. */
     public function upsertByKeys(array $row, array $keys, array $updateColumns = []): void
     {
         $this->doUpsertByKeys($row, $keys, $updateColumns, false);
@@ -222,7 +222,7 @@ use OrderByTools, PkTools, RepositoryHelpers;
         $helperKeys = $this->resolveUpsertKeys();
         if ($helperKeys && class_exists(\BlackCat\Database\Support\BulkUpsertHelper::class)) {
           $bulk = new \BlackCat\Database\Support\BulkUpsertHelper($this->db, \BlackCat\Database\Packages\WebauthnChallenges\Definitions::class);
-          $bulk->upsertMany($rows, $helperKeys, []);
+          $bulk->upsertMany($rows, $helperKeys, [ 'metadata', 'expires_at' ]);
           return count($rows);
         }
 
@@ -251,8 +251,13 @@ use OrderByTools, PkTools, RepositoryHelpers;
               fn($r) => !empty($r)
           ));
           if (!$rows) { return 0; }
+
+          /** @var list<string> $updCols */
+          $updCols = [ 'metadata', 'expires_at' ];
+          if ($updCols && $soft && !in_array($soft, $updCols, true)) { $updCols[] = $soft; }
+
           $bulk = new \BlackCat\Database\Support\BulkUpsertHelper($this->db, \BlackCat\Database\Packages\WebauthnChallenges\Definitions::class);
-          $bulk->upsertMany($rows, $helperKeys, $soft ? [$soft] : []);
+          $bulk->upsertMany($rows, $helperKeys, $updCols);
           return count($rows);
         }
 
@@ -265,174 +270,328 @@ use OrderByTools, PkTools, RepositoryHelpers;
 
     public function updateByIdWhere(int|string|array $id, #[\SensitiveParameter] array $row, array $where): int
     {
-        $row = $this->filterCols($this->normalizeInputRow($row));
-        if (!$row) return 0;
+        if ($where === []) {
+            return $this->updateById($id, $row);
+        }
 
-        $params = [];
-        $pkWhere = $this->buildPkWhere('t', $this->normalizePkInput($id, $this->pkColumns(Definitions::class)), $params, 'pk_');
-        $extra = $this->buildWhere($where, $params, 'w_');
+        $row = $this->normalizeInputRow($row);
 
-        $set = [];
-        foreach ($row as $k => $v) { $set[] = Ident::q($this->db, $k) . " = :set_{$k}"; $params["set_{$k}"] = $v; }
+        $tbl   = Ident::qi($this->db, Definitions::table());
+        $pkCols= $this->pkColumns(Definitions::class);
+        $idMap = $this->normalizePkInput($id, $pkCols);
 
-        $tbl = Ident::qi($this->db, Definitions::table());
-        $sql = "UPDATE {$tbl} t SET " . implode(',', $set) . " WHERE ({$pkWhere}) AND ({$extra})";
+        $verCol = Definitions::versionColumn();
+        $updAt  = Definitions::updatedAtColumn();
+
+        $hasExpectedVersion = $verCol && array_key_exists($verCol, $row);
+        $expectedVersion = $hasExpectedVersion ? $row[$verCol] : null;
+        if ($hasExpectedVersion) unset($row[$verCol]);
+
+        $row = $this->filterCols($row);
+
+        $params  = [];
+        $whereSql = $this->buildPkWhere('', $idMap, $params, 'pk_');
+
+        foreach ($where as $col => $val) {
+            $ph = 'w_' . $col;
+            $whereSql .= ' AND ' . Ident::q($this->db, (string)$col) . ' = :' . $ph;
+            $params[$ph] = $val;
+        }
+
+        $pkSet   = array_fill_keys($pkCols, true);
+        $assign  = [];
+
+        foreach ($row as $k => $v) {
+            if (isset($pkSet[$k])) continue;
+            $assign[]     = Ident::q($this->db, $k) . ' = :' . $k;
+            $params[$k]   = $v;
+        }
+
+        if ($verCol && $this->isNumericVersion()) {
+            $assign[] = Ident::q($this->db, $verCol) . ' = ' . Ident::q($this->db, $verCol) . ' + 1';
+        }
+        if ($updAt && !array_key_exists($updAt, $row)) {
+            $assign[] = Ident::q($this->db, $updAt) . ' = CURRENT_TIMESTAMP';
+        }
+
+        if (!$assign) return 0;
+
+        $sql = "UPDATE {$tbl} SET " . implode(', ', $assign) . " WHERE {$whereSql}";
+        if ($verCol && $hasExpectedVersion) {
+            $sql .= ' AND ' . Ident::q($this->db, $verCol) . ' = :expected_version';
+            $params['expected_version'] = is_numeric($expectedVersion) ? (int)$expectedVersion : $expectedVersion;
+        }
+
         return $this->db->execute($sql, $params);
     }
 
-    public function updateById(int|string|array $id, #[\SensitiveParameter] array $row): int
-    {
-        return $this->updateByIdWhere($id, $row, []);
-    }
+    public function updateById(int|string|array $id, #[\SensitiveParameter] array $row): int {
+        $row = $this->normalizeInputRow($row);
 
-    public function deleteById(int|string|array $id): int
-    {
-        $soft = Definitions::softDeleteColumn();
-        if ($soft) {
-            return $this->updateById($id, [ $soft => date('Y-m-d H:i:s') ]);
+        $tbl   = Ident::qi($this->db, Definitions::table());
+        $pkCols= $this->pkColumns(Definitions::class);
+        $idMap = $this->normalizePkInput($id, $pkCols);
+
+        $verCol = Definitions::versionColumn();
+        $updAt  = Definitions::updatedAtColumn();
+
+        $hasExpectedVersion = $verCol && array_key_exists($verCol, $row);
+        $expectedVersion = $hasExpectedVersion ? $row[$verCol] : null;
+        if ($hasExpectedVersion) unset($row[$verCol]);
+
+        $row = $this->filterCols($row);
+
+        $params  = [];
+        $wherePk = $this->buildPkWhere('', $idMap, $params, 'pk_');
+
+        $pkSet   = array_fill_keys($pkCols, true);
+        $assign  = [];
+
+        // payload columns (excluding PK)
+        foreach ($row as $k => $v) {
+            if (isset($pkSet[$k])) continue;
+            $assign[]     = Ident::q($this->db, $k) . ' = :' . $k;
+            $params[$k]   = $v;
         }
 
-        $params=[]; $where = $this->buildPkWhere('', $this->normalizePkInput($id, $this->pkColumns(Definitions::class)), $params, 'pk_');
+        // touch - version/updated_at
+        if ($verCol && $this->isNumericVersion()) {
+            $assign[] = Ident::q($this->db, $verCol) . ' = ' . Ident::q($this->db, $verCol) . ' + 1';
+        }
+        if ($updAt && !array_key_exists($updAt, $row)) {
+            $assign[] = Ident::q($this->db, $updAt) . ' = CURRENT_TIMESTAMP';
+        }
+
+        if (!$assign) return 0;
+
+        $sql = "UPDATE {$tbl} SET " . implode(', ', $assign) . " WHERE {$wherePk}";
+        if ($verCol && $hasExpectedVersion) {
+            $sql .= ' AND ' . Ident::q($this->db, $verCol) . ' = :expected_version';
+            $params['expected_version'] = is_numeric($expectedVersion) ? (int)$expectedVersion : $expectedVersion;
+        }
+
+        return $this->db->execute($sql, $params);
+    }
+
+    public function deleteById(int|string|array $id): int {
         $tbl = Ident::qi($this->db, Definitions::table());
-        return $this->db->execute("DELETE FROM {$tbl} WHERE {$where}", $params);
+        $pk  = $this->normalizePkInput($id, $this->pkColumns(Definitions::class));
+        $params=[]; $wherePk = $this->buildPkWhere('', $pk, $params, 'pk_');
+
+        if ($soft = Definitions::softDeleteColumn()) {
+            $set = Ident::q($this->db, $soft) . ' = CURRENT_TIMESTAMP';
+            if (($updAt = Definitions::updatedAtColumn()) && $updAt !== $soft) {
+                $set .= ', ' . Ident::q($this->db, $updAt) . ' = CURRENT_TIMESTAMP';
+            }
+            return $this->db->execute("UPDATE {$tbl} SET {$set} WHERE {$wherePk}", $params);
+        }
+        return $this->db->execute("DELETE FROM {$tbl} WHERE {$wherePk}", $params);
     }
 
-    public function restoreById(int|string|array $id): int
-    {
-        $soft = Definitions::softDeleteColumn();
-        if (!$soft) return 0;
-        return $this->updateById($id, [ $soft => null ]);
+    public function restoreById(int|string|array $id): int {
+        $tbl = Ident::qi($this->db, Definitions::table());
+        $pk  = $this->normalizePkInput($id, $this->pkColumns(Definitions::class));
+        $params=[]; $wherePk = $this->buildPkWhere('', $pk, $params, 'pk_');
+
+        $soft = Definitions::softDeleteColumn(); if (!$soft) return 0;
+        $set = Ident::q($this->db, $soft) . ' = NULL';
+        if (($updAt = Definitions::updatedAtColumn()) && $updAt !== $soft) {
+            $set .= ', ' . Ident::q($this->db, $updAt) . ' = CURRENT_TIMESTAMP';
+        }
+        return $this->db->execute("UPDATE {$tbl} SET {$set} WHERE {$wherePk}", $params);
     }
 
-    // --- READ ---------------------------------------------------------------
+    // --- READ / PAGE / LOCK --------------------------------------------------
 
-    /** @return array<string,mixed>|null */
-    public function findById(int|string|array $id): ?array
-    {
-        $params=[]; $where = $this->buildPkWhere('t', $this->normalizePkInput($id, $this->pkColumns(Definitions::class)), $params, 'pk_');
+    public function findById(int|string|array $id): ?array {
         $view = Ident::qi($this->db, Definitions::contractView());
-        $where = '(' . $where . ') AND ' . $this->softGuard('t');
-        $row = $this->db->fetchRow("SELECT * FROM {$view} t WHERE {$where} LIMIT 1", $params);
-        return is_array($row) ? $row : null;
+        $tbl  = Ident::qi($this->db, Definitions::table());
+
+        $params=[]; $idMap = $this->normalizePkInput($id, $this->pkColumns(Definitions::class));
+
+        // 1) view
+        try {
+            $where = $this->buildPkWhere('t', $idMap, $params, 'pk_');
+            $rows  = $this->db->fetchAll("SELECT t.* FROM {$view} t WHERE {$where} AND ".$this->softGuard('t'), $params);
+            if ($rows) return $rows[0];
+        } catch (\Throwable) { /* fallback below */ }
+
+        // 2) table fallback
+        $where = $this->buildPkWhere('', $idMap, $params, 'pk_');
+        $sql   = "SELECT * FROM {$tbl} WHERE {$where}";
+        $guard = $this->softGuard('');
+        if ($guard !== '1=1') $sql .= ' AND ' . $guard;
+        return $this->db->fetch($sql, $params) ?: null;
     }
 
-    /** @return array<int,array<string,mixed>> */
+    /**
+     * Find multiple rows by a list of primary keys. For composite PK expect maps (['col'=>val,...]).
+     * @param array<int,int|string|array> $ids
+     * @return array<int,array<string,mixed>>
+     */
     public function findAllByIds(array $ids): array
     {
-        if (!$ids) return [];
-        $pks = $this->pkColumns(Definitions::class);
-        if (count($pks) !== 1) { throw new \InvalidArgumentException('findAllByIds only supports single-column PK.'); }
+      if (!$ids) return [];
+        $tbl = Ident::qi($this->db, Definitions::table());
+        $pkCols = $this->pkColumns(Definitions::class);
+        $whereParts = [];
+        $params = [];
+        $i = 0;
 
-        $ids = array_values(array_filter(array_map(static fn($v) => is_scalar($v) ? $v : null, $ids), static fn($v) => $v !== null));
-        if (!$ids) return [];
+        if (count($pkCols) === 1) {
+            // fast path: IN (:p0,:p1,...)
+            $col = Ident::q($this->db, $pkCols[0]);
+            $guard = $this->softGuard('');
+            $all = [];
+            $ids = array_values($ids);
+            $chunk = 1000;
+            for ($o = 0; $o < count($ids); $o += $chunk) {
+                $slice = array_slice($ids, $o, $chunk);
+                $ph=[]; $params=[]; $j=0;
+                foreach ($slice as $v) { $k="p{$o}_{$j}"; $ph[]=":$k"; $params[$k]=$v; $j++; }
+                $sql = "SELECT * FROM {$tbl} WHERE {$col} IN (" . implode(',', $ph) . ")";
+                if ($guard !== '1=1') $sql .= ' AND ' . $guard;
+                $all = array_merge($all, $this->db->fetchAll($sql, $params));
+            }
+            return $all;
+        }
 
-        $view = Ident::qi($this->db, Definitions::contractView());
-        $pkCol = Ident::q($this->db, $pks[0]);
-        $where = 't.' . $pkCol . ' IN (' . implode(',', array_fill(0, count($ids), '?')) . ')';
-        $where = '(' . $where . ') AND ' . $this->softGuard('t');
+        foreach ($ids as $id) {
+            $map = $this->normalizePkInput($id, $pkCols);
+            $whereParts[] = '(' . $this->buildPkWhere('', $map, $params, 'b'.$i.'_') . ')';
+            $i++;
+        }
 
-        $rows = $this->db->fetchAll("SELECT * FROM {$view} t WHERE {$where}", $ids);
-        return is_array($rows) ? $rows : [];
+        $sql = "SELECT * FROM {$tbl} WHERE " . implode(' OR ', $whereParts);
+        $guard = $this->softGuard('');
+        if ($guard !== '1=1') $sql .= ' AND ' . $guard;
+
+        return $this->db->fetchAll($sql, $params);
     }
 
-    /** @return array<string,mixed>|Dto|null */
+    /**
+     * Fetch a record by a unique combination (aka "business keys").
+     * @param array<string,mixed> $keyValues assoc: sloupec => hodnota
+     * @return array<string,mixed>|Dto|null
+     */
     public function getByUnique(array $keyValues, bool $asDto = false): array|Dto|null
     {
-        $keyValues = $this->normalizeInputRow($keyValues);
         if (!$keyValues) return null;
-
-        $parts = [];
-        $params = [];
-        foreach ($keyValues as $k => $v) {
-            $k = (string)$k;
-            $parts[] = 't.' . Ident::q($this->db, $k) . " = :uniq_{$k}";
-            $params["uniq_{$k}"] = $v;
-        }
-        if (!$parts) return null;
-
         $view = Ident::qi($this->db, Definitions::contractView());
-        $where = '(' . implode(' AND ', $parts) . ') AND ' . $this->softGuard('t');
-        $row = $this->db->fetchRow("SELECT * FROM {$view} t WHERE {$where} LIMIT 1", $params);
 
-        if (!is_array($row)) return null;
-        return $asDto ? $this->mapReturnDto($row) : $row;
+        $keyValues = $this->ingressCriteriaTransform($keyValues);
+
+        $parts  = [];
+        $params = [];
+        foreach ($keyValues as $col => $val) {
+            $colQ = 't.' . Ident::q($this->db, (string)$col);
+            if ($val === null) {
+                $parts[] = $colQ . ' IS NULL';
+            } else {
+                $ph = 'u_' . $col;
+                $parts[] = $colQ . ' = :' . $ph;
+                $params[$ph] = $val;
+            }
+        }
+        $where = '(' . implode(' AND ', $parts) . ') AND ' . $this->softGuard('t');
+
+        $row = $this->db->fetch("SELECT t.* FROM {$view} t WHERE {$where} LIMIT 1", $params) ?: null;
+        return $asDto ? $this->mapReturnDto($row) : $this->mapReturnRow($row);
     }
 
-    public function exists(string $whereSql = '1=1', array $params = []): bool
-    {
-        $whereSql = trim($whereSql) ?: '1=1';
+    /**
+     * @param non-empty-string $whereSql
+     * @param array<string,bool|int|float|string|\DateTimeInterface|null> $params
+     */
+    public function exists(string $whereSql = '1=1', array $params = []): bool {
+        $whereSql = trim($whereSql) === '' ? '1=1' : $whereSql;
         $view = Ident::qi($this->db, Definitions::contractView());
         $where = '(' . $whereSql . ') AND ' . $this->softGuard('t');
         return (bool)$this->db->fetchOne("SELECT 1 FROM {$view} t WHERE {$where} LIMIT 1", $params);
     }
 
-    public function count(string $whereSql = '1=1', array $params = []): int
-    {
-        $whereSql = trim($whereSql) ?: '1=1';
+    /**
+     * @param non-empty-string $whereSql
+     * @param array<string,bool|int|float|string|\DateTimeInterface|null> $params
+     */
+    public function count(string $whereSql = '1=1', array $params = []): int {
+        $whereSql = trim($whereSql) === '' ? '1=1' : $whereSql;
         $view = Ident::qi($this->db, Definitions::contractView());
         $where = '(' . $whereSql . ') AND ' . $this->softGuard('t');
-        $n = $this->db->fetchOne("SELECT COUNT(*) FROM {$view} t WHERE {$where}", $params);
-        return is_numeric($n) ? (int)$n : 0;
+        return (int)$this->db->fetchOne("SELECT COUNT(*) FROM {$view} t WHERE {$where}", $params);
     }
 
-    // --- PAGINATION / LOCKING ----------------------------------------------
-
-    public function paginate(object $criteria): array
-    {
+    /**
+     * @return array{items:array<int,array<string,mixed>>,total:int,page:int,perPage:int}
+     */
+    public function paginate(object $criteria): array {
         if (!$criteria instanceof Criteria) {
             throw new \InvalidArgumentException('Expected ' . Criteria::class);
         }
         $c = $criteria;
 
+        [$where, $params, $order, $limit, $offset, $joins] = $c->toSql(true);
+        $where = '(' . $where . ') AND ' . $this->softGuard('t');
+        $order = $order ?: (Definitions::defaultOrder() ?? (Definitions::pk() . ' DESC'));
+        $orderSql = $this->buildOrderBy($order, Definitions::columns(), $this->db);
+
         $view = Ident::qi($this->db, Definitions::contractView());
-        $joins = $this->compileJoins($c->joins(), $c->joinParams());
-        $whereSql = $c->whereSql('t');
-        $params   = $c->params();
-        $whereSql = ($whereSql ? "({$whereSql}) AND " : "") . $this->softGuard('t');
-
-        $order = $c->orderBy() ?: (Definitions::defaultOrder() ?: 'id DESC');
-        $order = $this->normalizeOrderBy($order, $c, $view);
-
-        $page  = max(1, $c->page());
-        $pp    = max(1, $c->perPage());
-        $off   = ($page - 1) * $pp;
-
-        $sql = "SELECT * FROM {$view} t {$joins} WHERE {$whereSql} ORDER BY {$order} LIMIT {$pp} OFFSET {$off}";
-        $items = $this->db->fetchAll($sql, $params) ?: [];
-
-        $cntSql = "SELECT COUNT(*) FROM {$view} t {$joins} WHERE {$whereSql}";
-        $total = (int) ($this->db->fetchOne($cntSql, $params) ?: 0);
-
-        return [
-            'items' => $items,
-            'page'  => $page,
-            'per_page' => $pp,
-            'total' => $total,
-            'pages' => (int) ceil($total / max(1, $pp)),
-        ];
+        $total = (int)$this->db->fetchOne("SELECT COUNT(*) FROM {$view} t {$joins} WHERE {$where}", $params);
+        $items = $this->db->fetchAll("SELECT t.* FROM {$view} t {$joins} WHERE {$where}" . ($orderSql ? ' '.$orderSql : '') . " LIMIT {$limit} OFFSET {$offset}", $params);
+        return ['items'=>$items, 'total'=>$total, 'page'=>$c->page(), 'perPage'=>$c->perPage()];
     }
+
+    /** @param 'wait'|'nowait'|'skip_locked' $mode  @param 'update'|'share' $strength */
+    public function lockById(int|string|array $id, string $mode = 'wait', string $strength = 'update'): ?array {
+        $tbl = Ident::qi($this->db, Definitions::table());
+        $params=[]; $where = $this->buildPkWhere('', $this->normalizePkInput($id, $this->pkColumns(Definitions::class)), $params, 'pk_');
+        $guard = $this->softGuard('');
+        $sql = "SELECT * FROM {$tbl} WHERE {$where}";
+        if ($guard !== '1=1') { $sql .= ' AND ' . $guard; }
+
+        $mode = in_array($mode, ['wait','nowait','skip_locked'], true) ? $mode : 'wait';
+        $strength = in_array($strength, ['update','share'], true) ? $strength : 'update';
+
+        $dialect = $this->db->dialect()->value; // 'postgres' | 'mysql' | 'mariadb'
+        $for = 'FOR UPDATE';
+        if ($strength === 'share') {
+            if (in_array($dialect, ['postgres','mysql','mariadb'], true)) { $for = 'FOR SHARE'; }
+            else { $for = 'LOCK IN SHARE MODE'; }
+        }
+        $sql .= ' ' . $for . LockMode::compile($this->db, $mode);
+        $row = $this->db->fetch($sql, $params);
+        return $row ?: null;
+    }
+
+    // --- Keyset / seek pagination -------------------------------------------
 
     /**
      * @param array{col?:string,dir?:string,pk?:string,nullsLast?:bool} $order
      * @param array{colValue:mixed,pkValue:mixed}|null $cursor
      * @return array{0:array<int,array<string,mixed>>,1:array{colValue:mixed,pkValue:mixed}|null}
      */
-    public function paginateBySeek(object $criteria, array $order, ?array $cursor, int $limit): array
-    {
+    public function paginateBySeek(object $criteria, array $order, ?array $cursor, int $limit): array {
         if (!$criteria instanceof Criteria) {
             throw new \InvalidArgumentException('Expected ' . Criteria::class);
         }
-        $c = $criteria;
-        $limit = max(1, min(1000, $limit));
 
-        $view = Ident::qi($this->db, Definitions::contractView());
-        $joins = $this->compileJoins($c->joins(), $c->joinParams());
+        [$where, $params, /*$orderIgnored*/, /*$lim*/, /*$off*/, $joins] = $criteria->toSql(true);
+        $baseWhere = '(' . $where . ') AND ' . $this->softGuard('t');
 
-        $baseWhere = $c->whereSql('t');
-        $params    = $c->params();
-        $baseWhere = ($baseWhere ? "({$baseWhere}) AND " : "") . $this->softGuard('t');
+        $col = (string)($order['col'] ?? Definitions::pk());
+        $col = $col !== '' ? $col : Definitions::pk();
+        $dir = strtolower((string)($order['dir'] ?? 'desc'));
+        $dir = in_array($dir, ['asc','desc'], true) ? $dir : 'desc';
+        $pk  = (string)($order['pk'] ?? Definitions::pk());
+        $pk  = $pk !== '' ? $pk : Definitions::pk();
+        $orderSpec = [
+            'col' => $col,
+            'dir' => $dir,
+            'pk'  => $pk,
+        ];
 
-        $orderSpec = $this->normalizeSeekOrder($order, $c, $view);
+        $view = (string)Definitions::contractView();
+        if ($view === '') { throw new \InvalidArgumentException('contractView() must not be empty'); }
 
         return KeysetPaginator::paginate(
             $this->db,
@@ -444,20 +603,6 @@ use OrderByTools, PkTools, RepositoryHelpers;
             $cursor,
             $limit
         );
-    }
-
-    public function lockById(int|string|array $id, string $mode = 'wait', string $strength = 'update'): ?array
-    {
-        $mode = in_array($mode, ['wait','nowait','skip_locked'], true) ? $mode : 'wait';
-        $strength = in_array($strength, ['update','share'], true) ? $strength : 'update';
-
-        $params=[]; $where = $this->buildPkWhere('t', $this->normalizePkInput($id, $this->pkColumns(Definitions::class)), $params, 'pk_');
-        $view = Ident::qi($this->db, Definitions::contractView());
-        $where = '(' . $where . ') AND ' . $this->softGuard('t');
-
-        $lock = LockMode::sql($this->db, $mode, $strength);
-        $row = $this->db->fetchRow("SELECT * FROM {$view} t WHERE {$where} {$lock}", $params);
-        return is_array($row) ? $row : null;
     }
 
     public function existsById(int|string|array $id): bool {

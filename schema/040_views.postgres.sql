@@ -1,4 +1,4 @@
--- Auto-generated from schema-views-postgres.yaml
+-- Auto-generated from schema-views-postgres.yaml (map@sha1:5C6FE96DC2067A978A357A1DCB8631B46C71D429)
 -- engine: postgres
 -- table:  webauthn_challenges
 

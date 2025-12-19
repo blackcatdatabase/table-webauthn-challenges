@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace BlackCat\Database\Packages\WebauthnChallenges\Repository;
 
+use BlackCat\Database\Packages\WebauthnChallenges\Criteria;
 use BlackCat\Database\Contracts\ContractRepository as RepoContract;
 use BlackCat\Database\Contracts\KeysetRepository as KeysetRepoContract;
 use BlackCat\Database\Packages\WebauthnChallenges\Dto\WebauthnChallengeDto as Dto;

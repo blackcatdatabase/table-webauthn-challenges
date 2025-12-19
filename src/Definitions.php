@@ -117,7 +117,7 @@ final class Definitions {
     public static function isSoftDeleteEnabled(): bool { return self::softDeleteColumn() !== null; }
 
     /** @return string[] Columns containing PII for log/telemetry masking (module-specific). */
-    public static function piiColumns(): array { return [ 'metadata' ]; }
+    public static function piiColumns(): array { return []; }
 
     // --- derived "HAS_*" flags as methods (instead of constants calling functions) ---
     public static function hasTenant(): bool {
