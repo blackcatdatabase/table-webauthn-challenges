@@ -2,13 +2,13 @@
   "tables": {
     "webauthn_challenges": {
       "columns": {
+        "challenge_hash": {
+          "strategy": "passthrough"
+        },
         "created_at": {
           "strategy": "passthrough"
         },
         "expires_at": {
-          "strategy": "passthrough"
-        },
-        "challenge_hash": {
           "strategy": "passthrough"
         },
         "id": {
